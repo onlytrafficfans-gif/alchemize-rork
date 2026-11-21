@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack, useRouter, useRootNavigationState, useSegments } from "expo-router";
 import React, { useEffect } from "react";
-import { StyleSheet, Platform, View, Image } from 'react-native';
+import { StyleSheet, Platform, View, Image, AppState } from 'react-native';
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import * as SplashScreen from "expo-splash-screen";
@@ -10,6 +10,7 @@ import ScreenTransition from "@/components/ScreenTransition";
 import { ThemeProvider } from "@/contexts/theme-context";
 import { AuthProvider, useAuth } from "@/contexts/auth-context";
 import { initDatabase } from '@/lib/db/core';
+import { syncAppleHealthInBackground } from '@/lib/healthkit';
 import NetworkBanner from "@/components/NetworkBanner";
 import GestureOnboarding from "@/components/GestureOnboarding";
 import { registerForPushNotifications } from "@/lib/notifications";
@@ -169,7 +170,11 @@ export default function RootLayout() {
     if (Platform.OS !== 'web') {
       console.log('[App] Initializing database...');
       initDatabase()
-        .then(() => console.log('[App] Database ready'))
+        .then(async () => {
+          console.log('[App] Database ready');
+          // No-op unless the Apple Health switch is on.
+          await syncAppleHealthInBackground();
+        })
         .catch((err) => console.error('[App] Database init failed:', err));
 
       console.log('[App] Registering for push notifications...');
@@ -180,6 +185,20 @@ export default function RootLayout() {
         })
         .catch((err) => console.error('[App] Push registration error:', err));
     }
+  }, []);
+
+  // Returning to the app is the most reliable "background" sync iOS offers, so
+  // refresh Apple Health then. Throttled and a no-op when the switch is off.
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        void syncAppleHealthInBackground();
+      }
+    });
+
+    return () => subscription.remove();
   }, []);
 
   return (

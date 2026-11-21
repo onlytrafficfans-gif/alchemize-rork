@@ -3,12 +3,13 @@ import { View, StyleSheet, TextInput, Text, ScrollView, Alert, ActivityIndicator
 import { TouchableOpacity } from '@/components/HapticTouchable';
 import { useRouter } from 'expo-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Sparkles, Zap, X, ChevronLeft } from 'lucide-react-native';
+import { Sparkles, Zap, ChevronLeft } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { z } from 'zod';
 import { generateObject } from '@/lib/ai';
 import { workoutTemplatesDb, workoutSessionsDb, normalizedMetricsDb } from '@/lib/db/fitness';
 import { estimateCalories } from '@/lib/fitness';
+import { sendWorkoutToAppleHealth } from '@/lib/healthkit';
 import type { WorkoutSession, WorkoutTemplate } from '@/types';
 
 const CalorieEstimateSchema = z.object({
@@ -45,6 +46,7 @@ export default function AddWorkoutScreen() {
   const [duration, setDuration] = useState('');
   const [notes, setNotes] = useState('');
   const [workoutDescription, setWorkoutDescription] = useState('');
+  const [calories, setCalories] = useState('');
   const [aiCalories, setAiCalories] = useState<number | null>(null);
   const [aiExplanation, setAiExplanation] = useState<string | null>(null);
   const [aiConfidence, setAiConfidence] = useState<'low' | 'medium' | 'high' | null>(null);
@@ -58,7 +60,13 @@ export default function AddWorkoutScreen() {
 
       const category = WORKOUT_TYPE_MAP[type];
       const intensity = WORKOUT_TYPE_INTENSITY[type];
-      const calories = aiCalories ?? estimateCalories(durationNum, intensity);
+      // Priority: AI estimate, then a typed figure, then the local duration/intensity estimate.
+      const enteredCalories = parseInt(calories, 10);
+      const caloriesBurned =
+        aiCalories ??
+        (!isNaN(enteredCalories) && enteredCalories > 0
+          ? enteredCalories
+          : estimateCalories(durationNum, intensity));
 
       const templateId = `manual-${Date.now()}`;
       const template: WorkoutTemplate = {
@@ -81,7 +89,7 @@ export default function AddWorkoutScreen() {
         endedAt: now,
         durationMinutes: durationNum,
         completed: true,
-        caloriesEstimate: calories,
+        caloriesEstimate: caloriesBurned,
         source: 'manual',
       };
 
@@ -96,7 +104,7 @@ export default function AddWorkoutScreen() {
           id: existingMetric.id,
           date: dateStr,
           activeMinutes: durationNum,
-          caloriesActive: calories,
+          caloriesActive: caloriesBurned,
           steps: 0,
           source: 'workout',
           deviceType: 'none',
@@ -106,12 +114,15 @@ export default function AddWorkoutScreen() {
           id: `metric-${Date.now()}`,
           date: dateStr,
           activeMinutes: durationNum,
-          caloriesActive: calories,
+          caloriesActive: caloriesBurned,
           steps: 0,
           source: 'workout',
           deviceType: 'none',
         });
       }
+
+      // Mirror the finished workout to Apple Health when the user has it on.
+      await sendWorkoutToAppleHealth(session);
 
       return session;
     },
@@ -132,7 +143,7 @@ export default function AddWorkoutScreen() {
   const estimateCaloriesMutation = useMutation({
     mutationFn: async () => {
       if (!workoutDescription.trim() || !duration) return null;
-      
+
       const result = await generateObject({
         messages: [
           {
@@ -160,7 +171,10 @@ Provide an estimated calorie burn based on this information. Consider typical me
     },
     onError: (error) => {
       console.error('AI estimation error:', error);
-      Alert.alert('Estimation Failed', 'Could not estimate calories. Please try again or enter manually.');
+      const reason = error instanceof Error && error.message
+        ? error.message
+        : 'Could not estimate calories.';
+      Alert.alert('Estimation Failed', `${reason} You can also enter the calories manually.`);
     },
   });
 
@@ -274,6 +288,19 @@ Provide an estimated calorie burn based on this information. Consider typical me
             </TouchableOpacity>
           </View>
         )}
+
+        <Text style={styles.label}>Calories Burned (optional)</Text>
+        <TextInput
+          style={styles.input}
+          value={calories}
+          onChangeText={setCalories}
+          placeholder="Leave blank for an estimate"
+          placeholderTextColor="#666"
+          keyboardType="number-pad"
+        />
+        <Text style={styles.sublabel}>
+          Enter your own figure, or leave it blank and Alchemize estimates from duration and intensity.
+        </Text>
 
         <Text style={styles.label}>Additional Notes (optional)</Text>
         <TextInput

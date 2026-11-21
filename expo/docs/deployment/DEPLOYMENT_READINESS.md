@@ -20,7 +20,7 @@ build environment (never committed). `expo/.env.example` lists them.
 | --- | --- | --- |
 | `EXPO_PUBLIC_SUPABASE_URL` | Supabase project (auth, journal, image upload) | sign-in and journal screens fall back to their error state |
 | `EXPO_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key | same |
-| `EXPO_PUBLIC_AI_API_URL` | base URL of the AI proxy | AI calorie estimate and food scan report "AI service is not configured" |
+| `EXPO_PUBLIC_AI_API_URL` | base URL of the AI proxy | the AI workout calorie estimate reports "AI service is not configured" (manual calories and local estimates still work) |
 
 ## The AI Proxy Has To Be Hosted
 

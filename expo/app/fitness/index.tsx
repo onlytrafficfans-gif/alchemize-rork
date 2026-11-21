@@ -3,7 +3,8 @@ import { View, StyleSheet, ScrollView, Text, ImageBackground, Platform } from 'r
 import { TouchableOpacity } from '@/components/HapticTouchable';
 import { useRouter } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Play, TrendingUp, Award, ChevronRight, Plus, Dumbbell, Pencil } from 'lucide-react-native';
+import { Play, TrendingUp, Award, ChevronRight, Plus, Dumbbell, Pencil, Heart } from 'lucide-react-native';
+import { getAppleHealthStatus } from '@/lib/healthkit';
 import FitnessGoalsModal, { type FitnessGoalTargets } from '@/components/FitnessGoalsModal';
 import { workoutTemplatesDb, workoutSessionsDb, normalizedMetricsDb, fitnessGoalsDb, fitnessPlansDb, awardsDb } from '@/lib/db/fitness';
 import type { Award as AwardType } from '@/types';
@@ -17,6 +18,20 @@ import {
   markActiveDay,
 } from '@/lib/fitness';
 import { usePedometer } from '@/hooks/use-pedometer';
+/**
+ * Keeps a ring's number short enough to fit its circle: Apple Health can hand
+ * back large or fractional totals (12,483 steps, 431.9 cal), which would
+ * overflow the ring and get clipped. Thousands are abbreviated ("12.5k").
+ */
+function formatRingNumber(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '0';
+  const rounded = Math.round(value);
+  if (rounded < 1000) return String(rounded);
+  const thousands = rounded / 1000;
+  const short = thousands.toFixed(thousands >= 10 ? 0 : 1).replace(/\.0$/, '');
+  return `${short}k`;
+}
+
 export default function FitnessHubScreen() {
   const router = useRouter();
 
@@ -68,6 +83,15 @@ export default function FitnessHubScreen() {
     },
   });
 
+  const { data: appleHealthStatus } = useQuery({
+    queryKey: ['appleHealthStatus'],
+    queryFn: () => getAppleHealthStatus(),
+  });
+
+  // Only nudge when Apple Health is off, needs access, or has never completed a sync.
+  const showHealthReminder =
+    !appleHealthStatus?.enabled || !!appleHealthStatus?.needsPermission || !appleHealthStatus?.lastSyncedAt;
+
   const { steps: pedometerSteps } = usePedometer();
 
   const todayProgress = useMemo(() => getTodayProgress(sessions, todayMetric || null), [sessions, todayMetric]);
@@ -112,12 +136,22 @@ export default function FitnessHubScreen() {
   };
 
   const renderProgressRing = (value: number, goal: number, color: string, label: string) => {
+    const displayValue = formatRingNumber(value);
     return (
       <View style={styles.progressRing}>
         <View style={styles.ringOuter}>
           <View style={[styles.ringInner, { borderColor: color, borderWidth: 6 }]}>
-            <Text style={styles.ringValue}>{value}</Text>
-            <Text style={styles.ringGoal}>/ {goal}</Text>
+            <Text
+              style={[styles.ringValue, displayValue.length > 4 && styles.ringValueCompact]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.7}
+            >
+              {displayValue}
+            </Text>
+            <Text style={styles.ringGoal} numberOfLines={1}>
+              / {formatRingNumber(goal)}
+            </Text>
           </View>
         </View>
         <Text style={styles.ringLabel}>{label}</Text>
@@ -149,8 +183,23 @@ export default function FitnessHubScreen() {
               </View>
               <Plus size={24} color="#10b981" />
             </TouchableOpacity>
-            
 
+            {showHealthReminder && (
+              <View style={styles.healthReminder} testID="apple-health-reminder">
+                <Heart size={13} color="#ef4444" />
+                <Text style={styles.healthReminderText}>
+                  To sync your fitness data, make sure Apple Health is connected in{' '}
+                  <Text
+                    style={styles.healthReminderLink}
+                    onPress={() => router.push('/settings?section=apple-health' as any)}
+                    accessibilityRole="link"
+                  >
+                    Settings
+                  </Text>
+                  . You can also tap Sync Now to update your data manually.
+                </Text>
+              </View>
+            )}
           </View>
 
           <View style={styles.section}>
@@ -337,6 +386,9 @@ const styles = StyleSheet.create({
     fontWeight: '700' as const,
     color: '#fff',
   },
+  ringValueCompact: {
+    fontSize: 15,
+  },
   ringGoal: {
     fontSize: 12,
     color: '#666',
@@ -508,6 +560,23 @@ const styles = StyleSheet.create({
   addManualSubtitle: {
     fontSize: 13,
     color: '#10b981',
+  },
+  healthReminder: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginTop: 12,
+    paddingHorizontal: 12,
+  },
+  healthReminderText: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 17,
+    color: '#8a8a8a',
+  },
+  healthReminderLink: {
+    color: '#ef4444',
+    fontWeight: '600' as const,
   },
   wearableNote: {
     flexDirection: 'row',
